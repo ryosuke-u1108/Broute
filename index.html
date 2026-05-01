@@ -357,7 +357,7 @@ const APPLIANCES = [
   { name: "ドライヤー（強）",       watt: 1200 },
   { name: "電子レンジ",             watt: 1400 },
   { name: "エアコン（暖房）",       watt: 1500 },
-  { name: "IHクッキングヒーター",   watt: 3000 },
+  { name: "コーヒーメーカー",   watt: 1450 },
   { name: "電気ケトル",             watt: 1300 },
   { name: "掃除機",                 watt: 600  },
   { name: "炊飯器",                 watt: 1450 },
@@ -576,7 +576,7 @@ async function poll() {
 }
 
 poll();
-setInterval(poll, 5000);  // 5秒ごとにUIを更新
+setInterval(poll, 30000);  // 30sごとにUIを更新
 window.addEventListener('resize', drawChart);
 </script>
 </body>
