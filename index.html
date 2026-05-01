@@ -343,6 +343,7 @@ function drawChart(points) {
   const H = canvas.clientHeight;
   canvas.width  = W * dpr;
   canvas.height = H * dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // ←追加
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
 
@@ -358,7 +359,7 @@ function drawChart(points) {
   const cw = W - pad.l - pad.r;
   const ch = H - pad.t - pad.b;
   const vals = points.map(p => p.w);
-  const hi = Math.max(maxWatt, ...vals);
+  const hi = Math.max(...vals) * 1.2;
 
   // grid
   [0, .25, .5, .75, 1].forEach(f => {
