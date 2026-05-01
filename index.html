@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POWER MONITOR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #080b0f;
+    --surface:   #0d1117;
+    --border:    #1c2433;
+    --dim:       #1e2a3a;
+    --text:      #c8d8e8;
+    --muted:     #4a6070;
+    --accent:    #00e5ff;
+    --green:     #00ff88;
+    --yellow:    #ffcc00;
+    --orange:    #ff8800;
+    --red:       #ff3344;
+    --mono:      'Share Tech Mono', monospace;
+    --sans:      'Barlow Condensed', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+    letter-spacing: 0.02em;
+  }
+
+  /* scan-line overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 999; pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,.18) 2px, rgba(0,0,0,.18) 4px
+    );
+  }
+
+  /* ─── HEADER ─── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .logo {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: .15em;
+    text-transform: uppercase;
+  }
+  .logo span { color: var(--muted); }
+  #status-badge {
+    font-family: var(--mono); font-size: 11px;
+    padding: 4px 12px; border-radius: 2px;
+    border: 1px solid currentColor;
+    text-transform: uppercase; letter-spacing: .12em;
+  }
+  .badge-ok      { color: var(--green); }
+  .badge-connecting { color: var(--yellow); }
+  .badge-error   { color: var(--red); }
+  #last-update {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ─── MAIN GRID ─── */
+  main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    grid-template-rows: auto auto auto;
+    gap: 16px;
+    padding: 20px 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  /* ─── CARD ─── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 20px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent) 0%, transparent 100%);
+  }
+  .card-label {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .14em;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* ─── BIG WATT ─── */
+  .card-main {
+    grid-column: 1; grid-row: 1;
+    display: flex; flex-direction: column; justify-content: space-between;
+    min-height: 200px;
+  }
+  .watt-display {
+    display: flex; align-items: baseline; gap: 10px;
+    line-height: 1;
+  }
+  #watt-value {
+    font-family: var(--mono);
+    font-size: clamp(64px, 10vw, 108px);
+    color: var(--accent);
+    transition: color .3s;
+    text-shadow: 0 0 40px rgba(0,229,255,.3);
+  }
+  .watt-unit {
+    font-size: 28px; font-weight: 300;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .sub-metrics {
+    display: flex; gap: 32px; margin-top: 16px;
+  }
+  .sub-metric { }
+  .sub-metric .val {
+    font-family: var(--mono); font-size: 22px;
+    color: var(--text);
+  }
+  .sub-metric .lbl {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .1em;
+  }
+
+  /* ─── GAUGE ─── */
+  .card-gauge {
+    grid-column: 1; grid-row: 2;
+  }
+  .gauge-wrap {
+    position: relative; height: 28px;
+    background: var(--dim); border-radius: 2px;
+    overflow: hidden; margin-bottom: 10px;
+  }
+  #gauge-bar {
+    height: 100%; width: 0%;
+    transition: width .6s cubic-bezier(.4,0,.2,1), background .4s;
+    border-radius: 2px;
+    background: var(--green);
+    box-shadow: 0 0 20px currentColor;
+  }
+  .gauge-ticks {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 10px;
+    color: var(--muted);
+    padding: 0 2px;
+  }
+  .gauge-alert {
+    margin-top: 10px;
+    font-family: var(--mono); font-size: 13px;
+    min-height: 20px;
+  }
+
+  /* ─── REMAINING ─── */
+  .card-remaining {
+    grid-column: 2; grid-row: 1 / 3;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .remaining-num {
+    font-family: var(--mono); font-size: 48px;
+    color: var(--green); line-height: 1;
+    text-shadow: 0 0 30px rgba(0,255,136,.25);
+    transition: color .3s;
+  }
+  .remaining-sub {
+    font-size: 12px; color: var(--muted);
+    font-family: var(--mono);
+    text-transform: uppercase; letter-spacing: .1em;
+  }
+
+  .appliance-section { flex: 1; }
+  .appliance-label {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .appliance-list { list-style: none; }
+  .appliance-list li {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px; font-weight: 400;
+  }
+  .appliance-list li:last-child { border-bottom: none; }
+  .a-icon { font-size: 12px; width: 16px; text-align: center; }
+  .a-ok   { color: var(--green); }
+  .a-ng   { color: var(--red); }
+  .a-name { flex: 1; }
+  .a-watt { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  /* ─── CHART ─── */
+  .card-chart {
+    grid-column: 1 / 3; grid-row: 3;
+  }
+  #chart-canvas {
+    width: 100%; height: 120px;
+    display: block;
+  }
+
+  /* ─── WARNING BANNER ─── */
+  #warning-banner {
+    display: none;
+    background: rgba(255,51,68,.08);
+    border: 1px solid var(--red);
+    color: var(--red);
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: .08em;
+    padding: 12px 24px;
+    text-align: center;
+    animation: blink 1.2s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: .4; } }
+
+  /* ─── LOADING ─── */
+  #loading {
+    position: fixed; inset: 0; z-index: 900;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 20px;
+    transition: opacity .5s;
+  }
+  .spinner {
+    width: 48px; height: 48px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text {
+    font-family: var(--mono); font-size: 12px;
+    color: var(--muted); letter-spacing: .15em;
+    text-transform: uppercase;
+  }
+
+  /* responsive */
+  @media (max-width: 700px) {
+    main {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto;
+      padding: 12px;
+    }
+    .card-main, .card-gauge, .card-remaining, .card-chart {
+      grid-column: 1; grid-row: auto;
+    }
+    #watt-value { font-size: 72px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">Wi-SUN接続中...</div>
+</div>
+
+<div id="warning-banner"></div>
+
+<header>
+  <div class="logo">POWER<span>//</span>MONITOR &nbsp;&mdash;&nbsp; Bルート</div>
+  <span id="last-update">--:--:--</span>
+  <span id="status-badge" class="badge-connecting">CONNECTING</span>
+</header>
+
+<main>
+
+  <!-- 瞬時電力 -->
+  <div class="card card-main">
+    <div class="card-label">瞬時電力使用量</div>
+    <div>
+      <div class="watt-display">
+        <div id="watt-value">----</div>
+        <div class="watt-unit">W</div>
+      </div>
+      <div class="sub-metrics">
+        <div class="sub-metric">
+          <div class="val"><span id="ampere-r">--.-</span> A</div>
+          <div class="lbl">R相電流</div>
+        </div>
+        <div class="sub-metric">
+          <div class="val"><span id="ampere-t">--.-</span> A</div>
+          <div class="lbl">T相電流</div>
+        </div>
+        <div class="sub-metric">
+          <div class="val"><span id="pct-val">--.-%</span></div>
+          <div class="lbl">契約容量比</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ゲージ -->
+  <div class="card card-gauge">
+    <div class="card-label">負荷率 &mdash; <span id="contract-info">50A / 11,000W</span></div>
+    <div class="gauge-wrap">
+      <div id="gauge-bar"></div>
+    </div>
+    <div class="gauge-ticks">
+      <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+    </div>
+    <div class="gauge-alert" id="gauge-alert"></div>
+  </div>
+
+  <!-- 残余 & 家電チェック -->
+  <div class="card card-remaining">
+    <div class="card-label">使用可能残量</div>
+    <div>
+      <div class="remaining-num" id="remaining-w">----</div>
+      <div class="remaining-sub">W REMAINING</div>
+    </div>
+    <div class="appliance-section">
+      <div class="appliance-label">▸ 追加使用可能な家電</div>
+      <ul class="appliance-list" id="appliance-list">
+        <li><span class="a-icon">…</span><span class="a-name">取得中</span></li>
+      </ul>
+    </div>
+    <div class="appliance-section">
+      <div class="appliance-label" style="color:var(--red)">▸ ブレーカー注意</div>
+      <ul class="appliance-list" id="warning-list">
+        <li><span class="a-icon">…</span><span class="a-name">取得中</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 履歴チャート -->
+  <div class="card card-chart">
+    <div class="card-label">電力使用量 推移（直近10分）</div>
+    <canvas id="chart-canvas"></canvas>
+  </div>
+
+</main>
+
+<script>
+// ─── 家電リスト（W）
+const APPLIANCES = [
+  { name: "ドライヤー（強）",       watt: 1200 },
+  { name: "電子レンジ",             watt: 1400 },
+  { name: "エアコン（暖房）",       watt: 1500 },
+  { name: "IHクッキングヒーター",   watt: 3000 },
+  { name: "電気ケトル",             watt: 1300 },
+  { name: "掃除機",                 watt: 600  },
+  { name: "炊飯器",                 watt: 1450 },
+  { name: "洗濯乾燥機",             watt: 1400 },
+  { name: "照明（10灯）",           watt: 100  },
+];
+
+// ─── DOM refs
+const $watt      = document.getElementById('watt-value');
+const $ar        = document.getElementById('ampere-r');
+const $at        = document.getElementById('ampere-t');
+const $pct       = document.getElementById('pct-val');
+const $gauge     = document.getElementById('gauge-bar');
+const $gaugeAlert= document.getElementById('gauge-alert');
+const $remaining = document.getElementById('remaining-w');
+const $appList   = document.getElementById('appliance-list');
+const $warnList  = document.getElementById('warning-list');
+const $badge     = document.getElementById('status-badge');
+const $updated   = document.getElementById('last-update');
+const $banner    = document.getElementById('warning-banner');
+const $loading   = document.getElementById('loading');
+const canvas     = document.getElementById('chart-canvas');
+const ctx        = canvas.getContext('2d');
+
+let history = [];
+let maxWatt = 11000;
+let firstLoad = true;
+
+// ─── COLOR by percentage
+function pctColor(p) {
+  if (p < 60)  return 'var(--green)';
+  if (p < 80)  return 'var(--yellow)';
+  if (p < 90)  return 'var(--orange)';
+  return 'var(--red)';
+}
+
+// ─── Render appliance lists
+function renderAppliances(remaining) {
+  const ok  = APPLIANCES.filter(a => a.watt <= remaining);
+  const ng  = APPLIANCES.filter(a => a.watt  > remaining);
+
+  $appList.innerHTML = ok.length === 0
+    ? '<li><span class="a-icon a-ng">✕</span><span class="a-name">追加できる家電なし</span></li>'
+    : ok.map(a => `
+        <li>
+          <span class="a-icon a-ok">✓</span>
+          <span class="a-name">${a.name}</span>
+          <span class="a-watt">${a.watt}W</span>
+        </li>`).join('');
+
+  $warnList.innerHTML = ng.length === 0
+    ? '<li><span class="a-icon a-ok">✓</span><span class="a-name">余裕あり</span></li>'
+    : ng.map(a => `
+        <li>
+          <span class="a-icon a-ng">⚡</span>
+          <span class="a-name">${a.name}</span>
+          <span class="a-watt">${a.watt}W</span>
+        </li>`).join('');
+}
+
+// ─── Draw chart (pure canvas, no lib — ラズパイ3に優しい)
+function drawChart() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth;
+  const H = canvas.clientHeight;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  ctx.clearRect(0, 0, W, H);
+
+  if (history.length < 2) return;
+
+  const pad = { t: 8, r: 8, b: 24, l: 52 };
+  const cw = W - pad.l - pad.r;
+  const ch = H - pad.t - pad.b;
+
+  const vals = history.map(d => d.w);
+  const lo   = 0;
+  const hi   = Math.max(maxWatt, ...vals);
+
+  // grid lines
+  ctx.strokeStyle = 'rgba(28,36,51,.9)';
+  ctx.lineWidth   = 1;
+  [0, .25, .5, .75, 1].forEach(f => {
+    const y = pad.t + ch * (1 - f);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + cw, y);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(74,96,112,.7)';
+    ctx.font      = `10px 'Share Tech Mono'`;
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(hi * f) + 'W', pad.l - 6, y + 4);
+  });
+
+  // gradient fill
+  const toX = i => pad.l + (i / (history.length - 1)) * cw;
+  const toY = v => pad.t + ch * (1 - (v - lo) / (hi - lo));
+
+  const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
+  grad.addColorStop(0, 'rgba(0,229,255,.25)');
+  grad.addColorStop(1, 'rgba(0,229,255,.01)');
+
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(vals[0]));
+  for (let i = 1; i < vals.length; i++) ctx.lineTo(toX(i), toY(vals[i]));
+  ctx.lineTo(toX(vals.length - 1), pad.t + ch);
+  ctx.lineTo(toX(0), pad.t + ch);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // line
+  ctx.beginPath();
+  ctx.strokeStyle = 'var(--accent)';
+  ctx.lineWidth = 2;
+  ctx.lineJoin  = 'round';
+  ctx.moveTo(toX(0), toY(vals[0]));
+  for (let i = 1; i < vals.length; i++) ctx.lineTo(toX(i), toY(vals[i]));
+  ctx.stroke();
+
+  // x-axis labels (first, mid, last)
+  if (history.length > 0) {
+    ctx.fillStyle = 'rgba(74,96,112,.8)';
+    ctx.font      = `10px 'Share Tech Mono'`;
+    ctx.textAlign = 'center';
+    [[0, toX(0)], [Math.floor((history.length-1)/2), toX(Math.floor((history.length-1)/2))],
+     [history.length-1, toX(history.length-1)]].forEach(([i, x]) => {
+      ctx.fillText(history[i].t, x, H - 4);
+    });
+  }
+}
+
+// ─── Update UI
+function update(data) {
+  maxWatt = data.max_watt || 11000;
+
+  // badge
+  $badge.className = `badge-${data.status}`;
+  $badge.textContent = data.status === 'ok' ? 'LIVE' :
+                       data.status === 'connecting' ? 'CONNECTING' : 'ERROR';
+
+  if (data.status !== 'ok' || data.watt === null) return;
+
+  // hide loading
+  if (firstLoad) {
+    $loading.style.opacity = '0';
+    setTimeout(() => $loading.style.display = 'none', 500);
+    firstLoad = false;
+  }
+
+  const pct = data.pct;
+  const col = pctColor(pct);
+
+  // big number
+  $watt.textContent = data.watt.toLocaleString();
+  $watt.style.color = col;
+
+  $ar.textContent = data.ampere_r !== null ? data.ampere_r.toFixed(1) : '--.-';
+  $at.textContent = data.ampere_t !== null ? data.ampere_t.toFixed(1) : '--.-';
+  $pct.textContent = pct.toFixed(1) + '%';
+
+  // gauge
+  $gauge.style.width      = Math.min(pct, 100) + '%';
+  $gauge.style.background = col;
+  $gauge.style.boxShadow  = `0 0 20px ${col}`;
+
+  // gauge alert text
+  if (pct >= 90) {
+    $gaugeAlert.style.color = 'var(--red)';
+    $gaugeAlert.textContent = `⚠  ${(100 - pct).toFixed(1)}% しか余裕がありません！ブレーカーに注意！`;
+  } else if (pct >= 75) {
+    $gaugeAlert.style.color = 'var(--orange)';
+    $gaugeAlert.textContent = `⚠  使用量が多めです (残り ${data.remaining_w.toLocaleString()} W)`;
+  } else {
+    $gaugeAlert.style.color = 'var(--green)';
+    $gaugeAlert.textContent = `✓  安定稼働中 — 残り ${data.remaining_w.toLocaleString()} W`;
+  }
+
+  // remaining
+  $remaining.textContent = data.remaining_w.toLocaleString();
+  $remaining.style.color = col;
+
+  // warning banner
+  if (pct >= 90) {
+    $banner.style.display = 'block';
+    $banner.textContent = `⚡ 警告: 使用量 ${pct.toFixed(1)}% — ブレーカー落下の危険があります ⚡`;
+  } else {
+    $banner.style.display = 'none';
+  }
+
+  // appliances
+  renderAppliances(data.remaining_w);
+
+  // chart
+  if (data.history && data.history.length > 0) {
+    history = data.history;
+  }
+  drawChart();
+
+  // timestamp
+  if (data.updated_at) {
+    $updated.textContent = data.updated_at.slice(11, 19);
+  }
+}
+
+// ─── Poll
+async function poll() {
+  try {
+    const r = await fetch('/api/power');
+    if (r.ok) update(await r.json());
+  } catch(e) {
+    $badge.className = 'badge-error';
+    $badge.textContent = 'ERROR';
+  }
+}
+
+poll();
+setInterval(poll, 5000);  // 5秒ごとにUIを更新
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>
