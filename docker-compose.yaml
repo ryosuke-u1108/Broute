@@ -1,0 +1,10 @@
+version: '3'
+services:
+  python3:
+    build: .
+    container_name: 'Broute'
+    working_dir: '/root/'
+    tty: true
+    volumes:
+      - ./src:/root/src
+    command: ["tail", "-f", "/dev/null"]
