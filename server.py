@@ -28,7 +28,7 @@ import uvicorn
 # ============================================================
 BROUTE_ID = "00000099021A00000000000000D6360D"
 BROUTE_PWD = "LR2UJIKLM6HQ"
-SERIAL_PORT = "/dev/tty.usbserial-DJ007AIG"  # ラズパイ: /dev/ttyUSB0
+SERIAL_PORT = "/dev/ttyUSB0"  # ラズパイ: /dev/ttyUSB0
 BAUD_RATE = 115200
 
 CONTRACT_A = 50
