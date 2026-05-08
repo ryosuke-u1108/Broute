@@ -33,12 +33,12 @@ BAUD_RATE   = 115200
 
 CONTRACT_A   = 50
 VOLTAGE      = 220
-MAX_WATT     = CONTRACT_A * VOLTAGE   # 11000W
+MAX_WATT     = 5000   # 5000W
 
 POLL_INTERVAL = 30          # 秒
 RAM_SIZE      = 2880        # 2880 × 30秒 = 1日分
 DB_PATH       = "power.db"
-DB_KEEP_DAYS  = 7           # SQLiteに何日分保持するか
+DB_KEEP_DAYS  = 2          # SQLiteに何日分保持するか
 # ============================================================
 
 # ECHONET Lite フレーム（瞬時電力 0xE7 + 瞬時電流 0xE8）
@@ -275,6 +275,7 @@ APPLIANCES = [
     {"name": "電子レンジ",             "watt": 1400},
     {"name": "エアコン（暖房）",       "watt": 1500},
     {"name": "コーヒーマシン",   "watt": 1450},
+    {"name": "食洗機",   "watt": 1200},
     {"name": "電気ケトル",             "watt": 1300},
     {"name": "掃除機",                 "watt": 600},
     {"name": "炊飯器",                 "watt": 1450},
