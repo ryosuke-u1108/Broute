@@ -26,39 +26,51 @@ import uvicorn
 # ============================================================
 # ★ 設定
 # ============================================================
-BROUTE_ID   = "00000099021A00000000000000D6360D"
-BROUTE_PWD  = "LR2UJIKLM6HQ"
-SERIAL_PORT = "/dev/tty.usbserial-DJ007AIG"   # ラズパイ: /dev/ttyUSB0
-BAUD_RATE   = 115200
+BROUTE_ID = "00000099021A00000000000000D6360D"
+BROUTE_PWD = "LR2UJIKLM6HQ"
+SERIAL_PORT = "/dev/tty.usbserial-DJ007AIG"  # ラズパイ: /dev/ttyUSB0
+BAUD_RATE = 115200
 
-CONTRACT_A   = 50
-VOLTAGE      = 220
-MAX_WATT     = 5000   # 5000W
+CONTRACT_A = 50
+VOLTAGE = 220
+MAX_WATT = 5000  # 5000W
 
-POLL_INTERVAL = 30          # 秒
-RAM_SIZE      = 2880        # 2880 × 30秒 = 1日分
-DB_PATH       = "power.db"
-DB_KEEP_DAYS  = 2          # SQLiteに何日分保持するか
+POLL_INTERVAL = 30  # 秒
+RAM_SIZE = 2880  # 2880 × 30秒 = 1日分
+DB_PATH = "power.db"
+DB_KEEP_DAYS = 2  # SQLiteに何日分保持するか
 # ============================================================
 
 # ECHONET Lite フレーム（瞬時電力 0xE7 + 瞬時電流 0xE8）
-EL_FRAME = bytes([
-    0x10, 0x81, 0x00, 0x01,
-    0x05, 0xFF, 0x01,
-    0x02, 0x88, 0x01,
-    0x62, 0x02,
-    0xE7, 0x00,
-    0xE8, 0x00,
-])
+EL_FRAME = bytes(
+    [
+        0x10,
+        0x81,
+        0x00,
+        0x01,
+        0x05,
+        0xFF,
+        0x01,
+        0x02,
+        0x88,
+        0x01,
+        0x62,
+        0x02,
+        0xE7,
+        0x00,
+        0xE8,
+        0x00,
+    ]
+)
 
 # ─── グローバル状態
 state = {
-    "watt":       None,
-    "ampere_r":   None,
-    "ampere_t":   None,
+    "watt": None,
+    "ampere_r": None,
+    "ampere_t": None,
     "updated_at": None,
-    "status":     "connecting",
-    "ram":        deque(maxlen=RAM_SIZE),
+    "status": "connecting",
+    "ram": deque(maxlen=RAM_SIZE),
 }
 state_lock = threading.Lock()
 
@@ -66,23 +78,30 @@ state_lock = threading.Lock()
 # ─── SQLite
 def db_connect():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS power (
             ts   INTEGER PRIMARY KEY,
             watt INTEGER NOT NULL
         )
-    """)
+    """
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS ix_power_ts ON power(ts)")
     conn.commit()
     return conn
 
+
 db_conn = db_connect()
 db_lock = threading.Lock()
 
+
 def db_insert(ts: int, watt: int):
     with db_lock:
-        db_conn.execute("INSERT OR REPLACE INTO power(ts, watt) VALUES(?,?)", (ts, watt))
+        db_conn.execute(
+            "INSERT OR REPLACE INTO power(ts, watt) VALUES(?,?)", (ts, watt)
+        )
         db_conn.commit()
+
 
 def db_cleanup():
     cutoff = int((datetime.now() - timedelta(days=DB_KEEP_DAYS)).timestamp())
@@ -90,11 +109,11 @@ def db_cleanup():
         db_conn.execute("DELETE FROM power WHERE ts < ?", (cutoff,))
         db_conn.commit()
 
+
 def db_query(since_ts: int) -> list:
     with db_lock:
         rows = db_conn.execute(
-            "SELECT ts, watt FROM power WHERE ts >= ? ORDER BY ts ASC",
-            (since_ts,)
+            "SELECT ts, watt FROM power WHERE ts >= ? ORDER BY ts ASC", (since_ts,)
         ).fetchall()
     return [{"ts": r[0], "w": r[1]} for r in rows]
 
@@ -102,14 +121,19 @@ def db_query(since_ts: int) -> list:
 # ─── Wi-SUN 通信
 def open_serial():
     return serial.Serial(
-        SERIAL_PORT, baudrate=BAUD_RATE,
-        bytesize=8, parity=serial.PARITY_NONE,
-        stopbits=1, timeout=10,
+        SERIAL_PORT,
+        baudrate=BAUD_RATE,
+        bytesize=8,
+        parity=serial.PARITY_NONE,
+        stopbits=1,
+        timeout=10,
     )
+
 
 def send_cmd(ser, cmd: str):
     print(f"  >> {cmd}", file=sys.stderr)
     ser.write((cmd + "\r\n").encode())
+
 
 def readline(ser) -> str:
     raw = ser.readline()
@@ -117,6 +141,7 @@ def readline(ser) -> str:
     if line:
         print(f"  << {line}", file=sys.stderr)
     return line
+
 
 def wait_for(ser, keyword: str, timeout: float = 15.0) -> list:
     lines = []
@@ -128,6 +153,7 @@ def wait_for(ser, keyword: str, timeout: float = 15.0) -> list:
             if keyword in line:
                 return lines
     raise TimeoutError(f"'{keyword}' が受信できませんでした")
+
 
 def scan_and_join(ser) -> str:
     send_cmd(ser, f"SKSETPWD C {BROUTE_PWD}")
@@ -151,7 +177,9 @@ def scan_and_join(ser) -> str:
     if not all([channel, pan_id, mac_addr]):
         raise RuntimeError("スマートメータが見つかりませんでした")
 
-    print(f"[Wi-SUN] メータ発見 ch={channel} pan={pan_id} mac={mac_addr}", file=sys.stderr)
+    print(
+        f"[Wi-SUN] メータ発見 ch={channel} pan={pan_id} mac={mac_addr}", file=sys.stderr
+    )
     send_cmd(ser, f"SKSREG S2 {channel}")
     wait_for(ser, "OK")
     send_cmd(ser, f"SKSREG S3 {pan_id}")
@@ -177,6 +205,7 @@ def scan_and_join(ser) -> str:
             raise RuntimeError("PANA認証失敗")
     raise TimeoutError("PANA認証タイムアウト")
 
+
 def request_power(ser, ipv6: str):
     datalen = f"{len(EL_FRAME):04X}"
     header = f"SKSENDTO 1 {ipv6} 0E1A 1 {datalen} "
@@ -189,6 +218,7 @@ def request_power(ser, ipv6: str):
             if len(parts) >= 9:
                 return parse_el(parts[-1])
     return None, None, None
+
 
 def parse_el(hex_str: str):
     try:
@@ -205,10 +235,10 @@ def parse_el(hex_str: str):
         epc, pdc = data[idx], data[idx + 1]
         idx += 2
         if epc == 0xE7 and pdc == 4:
-            watt = int.from_bytes(data[idx:idx+4], "big", signed=True)
+            watt = int.from_bytes(data[idx : idx + 4], "big", signed=True)
         elif epc == 0xE8 and pdc == 4:
-            ampere_r = int.from_bytes(data[idx:idx+2], "big", signed=True)
-            ampere_t = int.from_bytes(data[idx+2:idx+4], "big", signed=True)
+            ampere_r = int.from_bytes(data[idx : idx + 2], "big", signed=True)
+            ampere_t = int.from_bytes(data[idx + 2 : idx + 4], "big", signed=True)
         idx += pdc
     return watt, ampere_r, ampere_t
 
@@ -231,14 +261,14 @@ def wisun_worker():
             while True:
                 watt, ar, at = request_power(ser, ipv6)
                 now = datetime.now()
-                ts  = int(now.timestamp())
+                ts = int(now.timestamp())
                 with state_lock:
                     if watt is not None:
-                        state["watt"]       = watt
-                        state["ampere_r"]   = ar
-                        state["ampere_t"]   = at
+                        state["watt"] = watt
+                        state["ampere_r"] = ar
+                        state["ampere_t"] = at
                         state["updated_at"] = now.isoformat()
-                        state["status"]     = "ok"
+                        state["status"] = "ok"
                         state["ram"].append({"ts": ts, "w": watt})
                 if watt is not None:
                     db_insert(ts, watt)
@@ -268,48 +298,51 @@ async def lifespan(application):
     print("[server] Wi-SUNワーカースレッド起動", file=sys.stderr)
     yield
 
+
 app = FastAPI(lifespan=lifespan)
 
 APPLIANCES = [
-    {"name": "ドライヤー（強）",       "watt": 1200},
-    {"name": "電子レンジ",             "watt": 1400},
-    {"name": "エアコン（暖房）",       "watt": 1500},
-    {"name": "コーヒーマシン",   "watt": 1450},
-    {"name": "食洗機",   "watt": 1200},
-    {"name": "電気ケトル",             "watt": 1300},
-    {"name": "掃除機",                 "watt": 600},
-    {"name": "炊飯器",                 "watt": 1450},
-    {"name": "洗濯乾燥機",             "watt": 1400},
-    {"name": "照明（10灯）",           "watt": 100},
+    {"name": "ドライヤー（強）", "watt": 1200},
+    {"name": "電子レンジ", "watt": 1400},
+    {"name": "エアコン（暖房）", "watt": 1500},
+    {"name": "コーヒーマシン", "watt": 1450},
+    {"name": "食洗機", "watt": 1200},
+    {"name": "電気ケトル", "watt": 1300},
+    {"name": "掃除機", "watt": 600},
+    {"name": "炊飯器", "watt": 1450},
+    {"name": "洗濯乾燥機", "watt": 1400},
+    {"name": "照明（10灯）", "watt": 100},
 ]
+
 
 @app.get("/api/power")
 def api_power():
     with state_lock:
-        watt       = state["watt"]
-        ar         = state["ampere_r"]
-        at_        = state["ampere_t"]
+        watt = state["watt"]
+        ar = state["ampere_r"]
+        at_ = state["ampere_t"]
         updated_at = state["updated_at"]
-        status     = state["status"]
-    pct         = round(watt / MAX_WATT * 100, 1) if watt is not None else None
-    remaining_w = (MAX_WATT - watt)                if watt is not None else None
+        status = state["status"]
+    pct = round(watt / MAX_WATT * 100, 1) if watt is not None else None
+    remaining_w = (MAX_WATT - watt) if watt is not None else None
     ok_apps, ng_apps = [], []
     if remaining_w is not None:
         for a in APPLIANCES:
             (ok_apps if a["watt"] <= remaining_w else ng_apps).append(a)
     return {
-        "watt":        watt,
-        "ampere_r":    round(ar  / 10, 1) if ar  is not None else None,
-        "ampere_t":    round(at_ / 10, 1) if at_ is not None else None,
-        "pct":         pct,
-        "max_watt":    MAX_WATT,
-        "contract_a":  CONTRACT_A,
+        "watt": watt,
+        "ampere_r": round(ar / 10, 1) if ar is not None else None,
+        "ampere_t": round(at_ / 10, 1) if at_ is not None else None,
+        "pct": pct,
+        "max_watt": MAX_WATT,
+        "contract_a": CONTRACT_A,
         "remaining_w": remaining_w,
-        "updated_at":  updated_at,
-        "status":      status,
-        "ok_apps":     ok_apps,
-        "ng_apps":     ng_apps,
+        "updated_at": updated_at,
+        "status": status,
+        "ok_apps": ok_apps,
+        "ng_apps": ng_apps,
     }
+
 
 @app.get("/api/history")
 def api_history(range: str = Query("1h", pattern="^(1h|24h)$")):
@@ -327,15 +360,21 @@ def api_history(range: str = Query("1h", pattern="^(1h|24h)$")):
     return {
         "range": range,
         "points": [
-            {"t": datetime.fromtimestamp(r["ts"]).strftime("%H:%M"), "ts": r["ts"], "w": r["w"]}
+            {
+                "t": datetime.fromtimestamp(r["ts"]).strftime("%H:%M"),
+                "ts": r["ts"],
+                "w": r["w"],
+            }
             for r in rows
-        ]
+        ],
     }
+
 
 @app.get("/", response_class=HTMLResponse)
 def index():
     with open("index.html", encoding="utf-8") as f:
         return f.read()
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

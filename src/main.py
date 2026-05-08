@@ -25,16 +25,24 @@ BAUD_RATE = 115200
 # ============================================================
 
 # ECHONET Lite 定数
-EL_FRAME = bytes([
-    0x10, 0x81,        # EHD (ECHONET Lite)
-    0x00, 0x01,        # TID
-    0x05, 0xFF, 0x01,  # SEOJ: コントローラ (管理・操作関連機器クラス)
-    0x02, 0x88, 0x01,  # DEOJ: 低圧スマート電力量メータ
-    0x62,              # ESV: Get要求
-    0x01,              # OPC: プロパティ数
-    0xE7,              # EPC: 瞬時電力計測値
-    0x00,              # PDC: データなし
-])
+EL_FRAME = bytes(
+    [
+        0x10,
+        0x81,  # EHD (ECHONET Lite)
+        0x00,
+        0x01,  # TID
+        0x05,
+        0xFF,
+        0x01,  # SEOJ: コントローラ (管理・操作関連機器クラス)
+        0x02,
+        0x88,
+        0x01,  # DEOJ: 低圧スマート電力量メータ
+        0x62,  # ESV: Get要求
+        0x01,  # OPC: プロパティ数
+        0xE7,  # EPC: 瞬時電力計測値
+        0x00,  # PDC: データなし
+    ]
+)
 
 
 def open_serial(port: str, baudrate: int) -> serial.Serial:
@@ -55,7 +63,9 @@ def send_command(ser: serial.Serial, cmd: str) -> None:
     print(f"  >> {cmd}")
 
 
-def wait_response(ser: serial.Serial, expected: str, timeout: float = 15.0) -> list[str]:
+def wait_response(
+    ser: serial.Serial, expected: str, timeout: float = 15.0
+) -> list[str]:
     """指定キーワードが含まれる行が来るまで待つ。収集した行を返す"""
     lines = []
     deadline = time.time() + timeout
@@ -102,7 +112,9 @@ def scan_and_join(ser: serial.Serial) -> tuple[str, str, str]:
             mac_addr = line.split(":")[1].strip()
 
     if not all([channel, pan_id, mac_addr]):
-        raise RuntimeError("スマートメータが見つかりませんでした。BルートIDとパスワード、電波状態を確認してください。")
+        raise RuntimeError(
+            "スマートメータが見つかりませんでした。BルートIDとパスワード、電波状態を確認してください。"
+        )
 
     print(f"\n[メータ発見] Channel={channel}  PAN ID={pan_id}  MAC={mac_addr}")
 
@@ -200,8 +212,8 @@ def parse_el_response(data_hex: str) -> Optional[int]:
     if len(data) < 12:
         return None
 
-    esv = data[10]   # ESV
-    opc = data[11]   # プロパティ数
+    esv = data[10]  # ESV
+    opc = data[11]  # プロパティ数
 
     # ESV=0x72 (Get_Res) を確認
     if esv != 0x72:
@@ -216,7 +228,7 @@ def parse_el_response(data_hex: str) -> Optional[int]:
         idx += 2
         if epc == 0xE7 and pdc == 4:
             # 瞬時電力: signed 32bit big-endian
-            watt = int.from_bytes(data[idx:idx + 4], byteorder="big", signed=True)
+            watt = int.from_bytes(data[idx : idx + 4], byteorder="big", signed=True)
             return watt
         idx += pdc
 
