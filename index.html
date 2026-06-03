@@ -145,8 +145,8 @@
   #chart-canvas { width: 100%; height: 200px; display: block; }
   #chart-loading { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: center; padding: 40px 0; display: none; }
 
-  /* ── REMAINING + APPLIANCES */
-  .card-right { grid-column: 2; grid-row: 1 / 4; display: flex; flex-direction: column; gap: 14px; }
+  /* ── RIGHT COLUMN */
+  .card-right { grid-column: 2; grid-row: 1 / 5; display: flex; flex-direction: column; gap: 14px; }
 
   .remaining-num {
     font-family: var(--mono); font-size: 44px;
@@ -156,6 +156,47 @@
   }
   .remaining-sub { font-family: var(--mono); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; margin-top: 2px; }
 
+  /* ── 積算・電気代カード */
+  .kwh-row {
+    display: flex; gap: 10px; align-items: baseline; line-height: 1; margin-bottom: 4px;
+  }
+  .kwh-val {
+    font-family: var(--mono); font-size: 36px; color: var(--yellow);
+    text-shadow: 0 0 24px rgba(255,204,0,.2);
+  }
+  .kwh-unit { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+  .cost-row {
+    display: flex; gap: 8px; align-items: baseline; margin-top: 6px;
+  }
+  .cost-val {
+    font-family: var(--mono); font-size: 28px; color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,229,255,.2);
+  }
+  .cost-unit { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .cost-note { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+  /* ── 料金設定フォーム */
+  .settings-card { }
+  .settings-card .card-label { margin-bottom: 12px; }
+  .setting-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; gap: 8px;
+  }
+  .setting-row:last-child { margin-bottom: 0; }
+  .setting-lbl { font-size: 12px; color: var(--muted); flex: 1; }
+  .setting-input-wrap { display: flex; align-items: center; gap: 4px; }
+  .setting-input {
+    font-family: var(--mono); font-size: 13px;
+    background: var(--dim); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 8px; border-radius: 2px;
+    width: 80px; text-align: right;
+    transition: border-color .2s;
+    outline: none;
+  }
+  .setting-input:focus { border-color: var(--accent); }
+  .setting-suffix { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+  /* ── 家電リスト */
   .app-section { flex: 1; }
   .app-section-label {
     font-size: 11px; font-weight: 600;
@@ -193,11 +234,8 @@
   .loading-text { font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: .15em; text-transform: uppercase; }
 
   @media (max-width: 680px) {
-    main {
-      display: flex;
-      flex-direction: column;
-    }
-    .card-main { order: 1; }
+    main { display: flex; flex-direction: column; }
+    .card-main  { order: 1; }
     .card-gauge { order: 2; }
     .card-right { order: 3; }
     .card-chart { order: 4; }
@@ -267,28 +305,73 @@
     <canvas id="chart-canvas"></canvas>
   </div>
 
-  <!-- 残余 + 家電 -->
-  <div class="card card-right">
-    <div>
+  <!-- 右カラム -->
+  <div class="card-right">
+
+    <!-- 使用可能残量 -->
+    <div class="card">
       <div class="card-label">使用可能残量</div>
       <div class="remaining-num" id="remaining-w">----</div>
       <div class="remaining-sub">W REMAINING</div>
     </div>
 
-    <div class="app-section">
+    <!-- 当月積算・電気代 -->
+    <div class="card">
+      <div class="card-label">当月使用量・電気代概算</div>
+      <div class="kwh-row">
+        <div class="kwh-val" id="kwh-month">--.-</div>
+        <div class="kwh-unit">kWh</div>
+      </div>
+      <div class="cost-row">
+        <div class="cost-val" id="cost-est">----</div>
+        <div class="cost-unit">円</div>
+      </div>
+      <div class="cost-note" id="cost-note">料金設定を入力してください</div>
+    </div>
+
+    <!-- 料金設定 -->
+    <div class="card settings-card">
+      <div class="card-label">⚙ 料金設定</div>
+      <div class="setting-row">
+        <span class="setting-lbl">基本料金</span>
+        <div class="setting-input-wrap">
+          <input class="setting-input" id="input-basic" type="number" min="0" step="1" value="" placeholder="例: 858">
+          <span class="setting-suffix">円/月</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-lbl">従量単価</span>
+        <div class="setting-input-wrap">
+          <input class="setting-input" id="input-rate" type="number" min="0" step="0.01" value="" placeholder="例: 30.00">
+          <span class="setting-suffix">円/kWh</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-lbl">燃料調整等</span>
+        <div class="setting-input-wrap">
+          <input class="setting-input" id="input-adj" type="number" step="0.01" value="0" placeholder="例: -3.50">
+          <span class="setting-suffix">円/kWh</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 追加できる家電 -->
+    <div class="card app-section">
       <div class="app-section-label ok">▸ 追加できる家電</div>
       <ul class="app-list" id="ok-list">
         <li><span class="a-icon">…</span><span class="a-name">取得中</span></li>
       </ul>
     </div>
 
-    <div class="app-section">
+    <!-- ブレーカー注意 -->
+    <div class="card app-section">
       <div class="app-section-label ng">▸ ブレーカー注意</div>
       <ul class="app-list" id="ng-list">
         <li><span class="a-icon">…</span><span class="a-name">取得中</span></li>
       </ul>
     </div>
-  </div>
+
+  </div><!-- /card-right -->
 
 </main>
 
@@ -300,6 +383,9 @@ const $pct       = document.getElementById('pct-val');
 const $gauge     = document.getElementById('gauge-bar');
 const $gaugeAlert= document.getElementById('gauge-alert');
 const $remaining = document.getElementById('remaining-w');
+const $kwhMonth  = document.getElementById('kwh-month');
+const $costEst   = document.getElementById('cost-est');
+const $costNote  = document.getElementById('cost-note');
 const $okList    = document.getElementById('ok-list');
 const $ngList    = document.getElementById('ng-list');
 const $badge     = document.getElementById('status-badge');
@@ -311,18 +397,51 @@ const $chartLoad = document.getElementById('chart-loading');
 const canvas     = document.getElementById('chart-canvas');
 const ctx        = canvas.getContext('2d');
 
+const $inputBasic = document.getElementById('input-basic');
+const $inputRate  = document.getElementById('input-rate');
+const $inputAdj   = document.getElementById('input-adj');
+
 let firstLoad    = true;
 let currentRange = '1h';
 let chartData    = [];
 let maxWatt      = 5000;
+let lastKwhMonth = null;
 
-// ── ポーリング用フラグ（多重リクエスト防止）
-let powerPolling = false;
-let chartPolling = false;
+// ── 料金設定の永続化（localStorage）
+function loadSettings() {
+  const basic = localStorage.getItem('pm_basic');
+  const rate  = localStorage.getItem('pm_rate');
+  const adj   = localStorage.getItem('pm_adj');
+  if (basic !== null) $inputBasic.value = basic;
+  if (rate  !== null) $inputRate.value  = rate;
+  if (adj   !== null) $inputAdj.value   = adj;
+}
+function saveSettings() {
+  localStorage.setItem('pm_basic', $inputBasic.value);
+  localStorage.setItem('pm_rate',  $inputRate.value);
+  localStorage.setItem('pm_adj',   $inputAdj.value);
+  updateCost(lastKwhMonth);
+}
+[$inputBasic, $inputRate, $inputAdj].forEach(el => el.addEventListener('change', saveSettings));
 
-// ── ポーリングタイマーID（画面非表示時に停止するため）
-let powerTimer = null;
-let chartTimer = null;
+function updateCost(kwh) {
+  lastKwhMonth = kwh;
+  if (kwh === null || kwh === undefined) return;
+  $kwhMonth.textContent = kwh.toFixed(1);
+
+  const basic = parseFloat($inputBasic.value) || 0;
+  const rate  = parseFloat($inputRate.value)  || 0;
+  const adj   = parseFloat($inputAdj.value)   || 0;
+
+  if (rate === 0 && basic === 0) {
+    $costEst.textContent  = '----';
+    $costNote.textContent = '料金設定を入力してください';
+    return;
+  }
+  const cost = Math.round(basic + kwh * (rate + adj));
+  $costEst.textContent  = cost.toLocaleString();
+  $costNote.textContent = `基本 ${basic.toLocaleString()}円 + 従量 ${kwh.toFixed(1)}kWh × ${(rate+adj).toFixed(2)}円`;
+}
 
 function pctColor(p) {
   if (p < 60) return 'var(--green)';
@@ -339,7 +458,6 @@ function renderAppliances(okApps, ngApps) {
         <span class="a-name">${a.name}</span>
         <span class="a-watt">${a.watt}W</span>
       </li>`).join('');
-
   $ngList.innerHTML = ngApps.length === 0
     ? '<li><span class="a-icon a-ok">✓</span><span class="a-name">余裕あり</span></li>'
     : ngApps.map(a => `<li>
@@ -349,7 +467,7 @@ function renderAppliances(okApps, ngApps) {
       </li>`).join('');
 }
 
-// ── Canvas チャート（ライブラリ不要）
+// ── チャート描画
 function drawChart(points) {
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.clientWidth;
@@ -372,9 +490,8 @@ function drawChart(points) {
   const cw = W - pad.l - pad.r;
   const ch = H - pad.t - pad.b;
   const vals = points.map(p => p.w);
-  const hi = Math.max(...vals) * 1.2;
+  const hi   = Math.max(...vals) * 1.2;
 
-  // grid
   [0, .25, .5, .75, 1].forEach(f => {
     const y = pad.t + ch * (1 - f);
     ctx.strokeStyle = 'rgba(74,96,112,.35)';
@@ -389,10 +506,7 @@ function drawChart(points) {
   const toX = i => pad.l + (i / (points.length - 1)) * cw;
   const toY = v => pad.t + ch * (1 - v / hi);
 
-  // fill
   const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
-  const css = getComputedStyle(document.documentElement);
-  const accent = css.getPropertyValue('--accent').trim();
   grad.addColorStop(0, 'rgba(0,229,255,.45)');
   grad.addColorStop(1, 'rgba(0,229,255,.05)');
   ctx.beginPath();
@@ -403,14 +517,13 @@ function drawChart(points) {
   ctx.closePath();
   ctx.fillStyle = grad; ctx.fill();
 
-  // line
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
   ctx.beginPath();
   ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.lineJoin = 'round';
   ctx.moveTo(toX(0), toY(vals[0]));
   for (let i = 1; i < vals.length; i++) ctx.lineTo(toX(i), toY(vals[i]));
   ctx.stroke();
 
-  // x-axis labels（均等に5点）
   ctx.fillStyle = 'rgba(74,96,112,.8)';
   ctx.font = `10px 'Share Tech Mono'`; ctx.textAlign = 'center';
   const labelCount = Math.min(5, points.length);
@@ -420,7 +533,6 @@ function drawChart(points) {
   }
 }
 
-// ── チャート範囲切り替え
 async function switchRange(range) {
   currentRange = range;
   document.getElementById('btn-1h').classList.toggle('active', range === '1h');
@@ -428,8 +540,6 @@ async function switchRange(range) {
   await fetchHistory();
 }
 
-// ── チャートデータ取得
-// 前回データを保持したまま表示し、取得成功時のみ更新する
 async function fetchHistory() {
   $chartLoad.style.display = 'block';
   canvas.style.display = 'none';
@@ -442,7 +552,6 @@ async function fetchHistory() {
     chartData = data.points;
   } catch(e) {
     console.warn('[chart] fetchHistory failed:', e.message);
-    // 失敗しても前回のchartDataで再描画（画面が消えない）
   } finally {
     $chartLoad.style.display = 'none';
     canvas.style.display = 'block';
@@ -452,7 +561,7 @@ async function fetchHistory() {
 
 // ── メイン更新
 function update(data) {
-  maxWatt = data.max_watt || 11000;
+  maxWatt = data.max_watt || 5000;
   $badge.className = `badge-${data.status}`;
   $badge.textContent = data.status === 'ok' ? 'LIVE'
     : data.status === 'connecting' ? 'CONNECTING' : 'ERROR';
@@ -468,7 +577,6 @@ function update(data) {
     setTimeout(() => { $loading.style.display = 'none'; }, 500);
     firstLoad = false;
     fetchHistory();
-    // チャートポーリング開始（電力ポーリングとはズラす）
     chartTimer = setTimeout(schedulePollChart, 30000);
   }
 
@@ -503,6 +611,9 @@ function update(data) {
   $remaining.textContent = data.remaining_w.toLocaleString();
   $remaining.style.color = col;
 
+  // 積算・電気代
+  updateCost(data.kwh_month !== null && data.kwh_month !== undefined ? data.kwh_month : null);
+
   renderAppliances(data.ok_apps || [], data.ng_apps || []);
 
   if (data.updated_at) {
@@ -510,10 +621,14 @@ function update(data) {
   }
 }
 
-// ── 電力ポーリング（再帰 setTimeout・フラグによる多重防止）
+// ── ポーリング
+let powerPolling = false;
+let chartPolling = false;
+let powerTimer   = null;
+let chartTimer   = null;
+
 async function schedulePollPower() {
   if (powerPolling) {
-    // 前のリクエストがまだ終わっていない場合は短めに再試行
     powerTimer = setTimeout(schedulePollPower, 1000);
     return;
   }
@@ -521,21 +636,16 @@ async function schedulePollPower() {
   try {
     const r = await fetch('/api/power', { signal: AbortSignal.timeout(4000) });
     if (r.ok) update(await r.json());
-    else {
-      $badge.className = 'badge-error';
-      $badge.textContent = 'ERROR';
-    }
+    else { $badge.className = 'badge-error'; $badge.textContent = 'ERROR'; }
   } catch(e) {
     console.warn('[power] poll failed:', e.message);
-    $badge.className = 'badge-error';
-    $badge.textContent = 'ERROR';
+    $badge.className = 'badge-error'; $badge.textContent = 'ERROR';
   } finally {
     powerPolling = false;
     powerTimer = setTimeout(schedulePollPower, 5000);
   }
 }
 
-// ── チャートポーリング（再帰 setTimeout・フラグによる多重防止）
 async function schedulePollChart() {
   if (firstLoad || chartPolling) {
     chartTimer = setTimeout(schedulePollChart, 30000);
@@ -550,22 +660,20 @@ async function schedulePollChart() {
   }
 }
 
-// ── ページ非表示時はポーリングを停止、復帰時に即時再開
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     clearTimeout(powerTimer);
     clearTimeout(chartTimer);
   } else {
-    // タブが再表示されたら即座に再開
     schedulePollPower();
     if (!firstLoad) schedulePollChart();
   }
 });
 
-// ── リサイズ時に再描画
 window.addEventListener('resize', () => drawChart(chartData));
 
 // ── 起動
+loadSettings();
 schedulePollPower();
 </script>
 </body>
