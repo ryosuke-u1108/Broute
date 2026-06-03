@@ -192,12 +192,11 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .loading-text { font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: .15em; text-transform: uppercase; }
 
-  @media  (max-width: 680px) {
+  @media (max-width: 680px) {
     main {
       display: flex;
       flex-direction: column;
     }
-
     .card-main { order: 1; }
     .card-gauge { order: 2; }
     .card-right { order: 3; }
@@ -312,10 +311,18 @@ const $chartLoad = document.getElementById('chart-loading');
 const canvas     = document.getElementById('chart-canvas');
 const ctx        = canvas.getContext('2d');
 
-let firstLoad   = true;
+let firstLoad    = true;
 let currentRange = '1h';
-let chartData   = [];
-let maxWatt     = 5000;
+let chartData    = [];
+let maxWatt      = 5000;
+
+// ── ポーリング用フラグ（多重リクエスト防止）
+let powerPolling = false;
+let chartPolling = false;
+
+// ── ポーリングタイマーID（画面非表示時に停止するため）
+let powerTimer = null;
+let chartTimer = null;
 
 function pctColor(p) {
   if (p < 60) return 'var(--green)';
@@ -349,7 +356,7 @@ function drawChart(points) {
   const H = canvas.clientHeight;
   canvas.width  = W * dpr;
   canvas.height = H * dpr;
-  ctx.setTransform(1, 0, 0, 1, 0, 0); // ←追加
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
 
@@ -386,7 +393,6 @@ function drawChart(points) {
   const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
   const css = getComputedStyle(document.documentElement);
   const accent = css.getPropertyValue('--accent').trim();
-  ctx.strokeStyle = accent;
   grad.addColorStop(0, 'rgba(0,229,255,.45)');
   grad.addColorStop(1, 'rgba(0,229,255,.05)');
   ctx.beginPath();
@@ -396,11 +402,10 @@ function drawChart(points) {
   ctx.lineTo(toX(0), pad.t + ch);
   ctx.closePath();
   ctx.fillStyle = grad; ctx.fill();
-  ctx.lineWidth = 3;
 
   // line
   ctx.beginPath();
-  ctx.strokeStyle = 'var(--accent)'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.lineJoin = 'round';
   ctx.moveTo(toX(0), toY(vals[0]));
   for (let i = 1; i < vals.length; i++) ctx.lineTo(toX(i), toY(vals[i]));
   ctx.stroke();
@@ -423,20 +428,25 @@ async function switchRange(range) {
   await fetchHistory();
 }
 
+// ── チャートデータ取得
+// 前回データを保持したまま表示し、取得成功時のみ更新する
 async function fetchHistory() {
   $chartLoad.style.display = 'block';
   canvas.style.display = 'none';
   try {
-    const r = await fetch(`/api/history?range=${currentRange}`);
-    if (!r.ok) return;
+    const r = await fetch(`/api/history?range=${currentRange}`, {
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     chartData = data.points;
+  } catch(e) {
+    console.warn('[chart] fetchHistory failed:', e.message);
+    // 失敗しても前回のchartDataで再描画（画面が消えない）
+  } finally {
     $chartLoad.style.display = 'none';
     canvas.style.display = 'block';
     drawChart(chartData);
-  } catch(e) {
-    $chartLoad.style.display = 'none';
-    canvas.style.display = 'block';
   }
 }
 
@@ -444,7 +454,8 @@ async function fetchHistory() {
 function update(data) {
   maxWatt = data.max_watt || 11000;
   $badge.className = `badge-${data.status}`;
-  $badge.textContent = data.status === 'ok' ? 'LIVE' : data.status === 'connecting' ? 'CONNECTING' : 'ERROR';
+  $badge.textContent = data.status === 'ok' ? 'LIVE'
+    : data.status === 'connecting' ? 'CONNECTING' : 'ERROR';
 
   if (data.status === 'connecting') {
     $loadingTx.textContent = 'Wi-SUN接続中...';
@@ -454,9 +465,11 @@ function update(data) {
 
   if (firstLoad) {
     $loading.style.opacity = '0';
-    setTimeout(() => $loading.style.display = 'none', 500);
+    setTimeout(() => { $loading.style.display = 'none'; }, 500);
     firstLoad = false;
     fetchHistory();
+    // チャートポーリング開始（電力ポーリングとはズラす）
+    chartTimer = setTimeout(schedulePollChart, 30000);
   }
 
   const pct = data.pct;
@@ -497,26 +510,63 @@ function update(data) {
   }
 }
 
-// ── ポーリング
-async function pollPower() {
+// ── 電力ポーリング（再帰 setTimeout・フラグによる多重防止）
+async function schedulePollPower() {
+  if (powerPolling) {
+    // 前のリクエストがまだ終わっていない場合は短めに再試行
+    powerTimer = setTimeout(schedulePollPower, 1000);
+    return;
+  }
+  powerPolling = true;
   try {
-    const r = await fetch('/api/power');
+    const r = await fetch('/api/power', { signal: AbortSignal.timeout(4000) });
     if (r.ok) update(await r.json());
+    else {
+      $badge.className = 'badge-error';
+      $badge.textContent = 'ERROR';
+    }
   } catch(e) {
+    console.warn('[power] poll failed:', e.message);
     $badge.className = 'badge-error';
     $badge.textContent = 'ERROR';
+  } finally {
+    powerPolling = false;
+    powerTimer = setTimeout(schedulePollPower, 5000);
   }
 }
 
-// チャートは30秒ごとに更新（ポーリングと同期）
-async function pollChart() {
-  if (!firstLoad) await fetchHistory();
+// ── チャートポーリング（再帰 setTimeout・フラグによる多重防止）
+async function schedulePollChart() {
+  if (firstLoad || chartPolling) {
+    chartTimer = setTimeout(schedulePollChart, 30000);
+    return;
+  }
+  chartPolling = true;
+  try {
+    await fetchHistory();
+  } finally {
+    chartPolling = false;
+    chartTimer = setTimeout(schedulePollChart, 30000);
+  }
 }
 
-pollPower();
-setInterval(pollPower,  5000);   // 5秒ごとにUI更新
-setInterval(pollChart, 30000);   // 30秒ごとにチャート更新
+// ── ページ非表示時はポーリングを停止、復帰時に即時再開
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    clearTimeout(powerTimer);
+    clearTimeout(chartTimer);
+  } else {
+    // タブが再表示されたら即座に再開
+    schedulePollPower();
+    if (!firstLoad) schedulePollChart();
+  }
+});
+
+// ── リサイズ時に再描画
 window.addEventListener('resize', () => drawChart(chartData));
+
+// ── 起動
+schedulePollPower();
 </script>
 </body>
 </html>
