@@ -196,7 +196,12 @@
   .setting-input:focus { border-color: var(--accent); }
   .setting-suffix { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
-  /* ── 家電リスト */
+  .setting-divider {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted); margin: 10px 0 8px;
+    border-top: 1px solid var(--border); padding-top: 8px;
+  }
   .app-section { flex: 1; }
   .app-section-label {
     font-size: 11px; font-weight: 600;
@@ -335,21 +340,37 @@
       <div class="setting-row">
         <span class="setting-lbl">基本料金</span>
         <div class="setting-input-wrap">
-          <input class="setting-input" id="input-basic" type="number" min="0" step="1" value="" placeholder="例: 858">
+          <input class="setting-input" id="input-basic" type="number" min="0" step="1" value="" placeholder="858">
           <span class="setting-suffix">円/月</span>
         </div>
       </div>
+      <div class="setting-divider">電力量料金（3段階）</div>
       <div class="setting-row">
-        <span class="setting-lbl">従量単価</span>
+        <span class="setting-lbl">〜120kWh</span>
         <div class="setting-input-wrap">
-          <input class="setting-input" id="input-rate" type="number" min="0" step="0.01" value="" placeholder="例: 30.00">
+          <input class="setting-input" id="input-r1" type="number" min="0" step="0.01" value="29.90" placeholder="29.90">
           <span class="setting-suffix">円/kWh</span>
         </div>
       </div>
       <div class="setting-row">
+        <span class="setting-lbl">121〜300kWh</span>
+        <div class="setting-input-wrap">
+          <input class="setting-input" id="input-r2" type="number" min="0" step="0.01" value="35.59" placeholder="35.59">
+          <span class="setting-suffix">円/kWh</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-lbl">301kWh〜</span>
+        <div class="setting-input-wrap">
+          <input class="setting-input" id="input-r3" type="number" min="0" step="0.01" value="36.50" placeholder="36.50">
+          <span class="setting-suffix">円/kWh</span>
+        </div>
+      </div>
+      <div class="setting-divider">その他</div>
+      <div class="setting-row">
         <span class="setting-lbl">燃料調整等</span>
         <div class="setting-input-wrap">
-          <input class="setting-input" id="input-adj" type="number" step="0.01" value="0" placeholder="例: -3.50">
+          <input class="setting-input" id="input-adj" type="number" step="0.01" value="0" placeholder="0.00">
           <span class="setting-suffix">円/kWh</span>
         </div>
       </div>
@@ -398,7 +419,9 @@ const canvas     = document.getElementById('chart-canvas');
 const ctx        = canvas.getContext('2d');
 
 const $inputBasic = document.getElementById('input-basic');
-const $inputRate  = document.getElementById('input-rate');
+const $inputR1    = document.getElementById('input-r1');
+const $inputR2    = document.getElementById('input-r2');
+const $inputR3    = document.getElementById('input-r3');
 const $inputAdj   = document.getElementById('input-adj');
 
 let firstLoad    = true;
@@ -409,20 +432,53 @@ let lastKwhMonth = null;
 
 // ── 料金設定の永続化（localStorage）
 function loadSettings() {
-  const basic = localStorage.getItem('pm_basic');
-  const rate  = localStorage.getItem('pm_rate');
-  const adj   = localStorage.getItem('pm_adj');
-  if (basic !== null) $inputBasic.value = basic;
-  if (rate  !== null) $inputRate.value  = rate;
-  if (adj   !== null) $inputAdj.value   = adj;
+  const map = {
+    pm_basic: $inputBasic,
+    pm_r1:    $inputR1,
+    pm_r2:    $inputR2,
+    pm_r3:    $inputR3,
+    pm_adj:   $inputAdj,
+  };
+  for (const [key, el] of Object.entries(map)) {
+    const v = localStorage.getItem(key);
+    if (v !== null) el.value = v;
+  }
 }
 function saveSettings() {
   localStorage.setItem('pm_basic', $inputBasic.value);
-  localStorage.setItem('pm_rate',  $inputRate.value);
+  localStorage.setItem('pm_r1',    $inputR1.value);
+  localStorage.setItem('pm_r2',    $inputR2.value);
+  localStorage.setItem('pm_r3',    $inputR3.value);
   localStorage.setItem('pm_adj',   $inputAdj.value);
   updateCost(lastKwhMonth);
 }
-[$inputBasic, $inputRate, $inputAdj].forEach(el => el.addEventListener('change', saveSettings));
+[$inputBasic, $inputR1, $inputR2, $inputR3, $inputAdj]
+  .forEach(el => el.addEventListener('change', saveSettings));
+
+// ── 3段階従量課金の計算
+// 〜120kWh: r1 / 121〜300kWh: r2 / 301kWh〜: r3
+function calcTieredCost(kwh, r1, r2, r3, adj) {
+  let cost = 0;
+  const effective = (rate) => rate + adj;
+  if (kwh <= 120) {
+    cost = kwh * effective(r1);
+  } else if (kwh <= 300) {
+    cost = 120 * effective(r1)
+         + (kwh - 120) * effective(r2);
+  } else {
+    cost = 120 * effective(r1)
+         + 180 * effective(r2)
+         + (kwh - 300) * effective(r3);
+  }
+  return cost;
+}
+
+// 現在の段階を返す（UIの色分け用）
+function currentTier(kwh) {
+  if (kwh <= 120)  return 1;
+  if (kwh <= 300)  return 2;
+  return 3;
+}
 
 function updateCost(kwh) {
   lastKwhMonth = kwh;
@@ -430,17 +486,25 @@ function updateCost(kwh) {
   $kwhMonth.textContent = kwh.toFixed(1);
 
   const basic = parseFloat($inputBasic.value) || 0;
-  const rate  = parseFloat($inputRate.value)  || 0;
+  const r1    = parseFloat($inputR1.value)    || 0;
+  const r2    = parseFloat($inputR2.value)    || 0;
+  const r3    = parseFloat($inputR3.value)    || 0;
   const adj   = parseFloat($inputAdj.value)   || 0;
 
-  if (rate === 0 && basic === 0) {
+  if (r1 === 0 && r2 === 0 && r3 === 0 && basic === 0) {
     $costEst.textContent  = '----';
     $costNote.textContent = '料金設定を入力してください';
     return;
   }
-  const cost = Math.round(basic + kwh * (rate + adj));
-  $costEst.textContent  = cost.toLocaleString();
-  $costNote.textContent = `基本 ${basic.toLocaleString()}円 + 従量 ${kwh.toFixed(1)}kWh × ${(rate+adj).toFixed(2)}円`;
+
+  const tiered = calcTieredCost(kwh, r1, r2, r3, adj);
+  const total  = Math.round(basic + tiered);
+  const tier   = currentTier(kwh);
+  const tierLabels = ['', '第1段階(〜120)', '第2段階(〜300)', '第3段階(301〜)'];
+  const adjStr = adj !== 0 ? ` (調整${adj >= 0 ? '+' : ''}${adj.toFixed(2)})` : '';
+
+  $costEst.textContent  = total.toLocaleString();
+  $costNote.textContent = `基本 ${basic.toLocaleString()}円 + 従量 ${kwh.toFixed(1)}kWh｜${tierLabels[tier]}${adjStr}`;
 }
 
 function pctColor(p) {
