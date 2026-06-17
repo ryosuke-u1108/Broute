@@ -19,39 +19,44 @@ import sqlite3
 from collections import deque
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
+from os import getenv
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 import uvicorn
 
 # ============================================================
-# ★ 設定
+# ★ 設定 (env から読みにいく)
 # ============================================================
-BROUTE_ID  = "00000099021A00000000000000D6360D"
-BROUTE_PWD = "LR2UJIKLM6HQ"
-SERIAL_PORT = "/dev/ttyUSB0"
-BAUD_RATE   = 115200
+BROUTE_ID  = getenv("BROUTE_ID", "00000099021A00000000000000D6360D")
+BROUTE_PWD = getenv("BROUTE_PWD", "LR2UJIKLM6HQ")
+SERIAL_PORT = getenv("SERIAL_PORT", "/dev/ttyUSB0")
+BAUD_RATE   = int(getenv("BAUD_RATE", "115200"))
 
-CONTRACT_A = 50
-VOLTAGE    = 220
-MAX_WATT   = 5000
+CONTRACT_A = int(getenv("CONTRACT_A", "50"))
+VOLTAGE    = int(getenv("VOLTAGE", "220"))
+MAX_WATT   = int(getenv("MAX_WATT", "5000"))
 
-POLL_INTERVAL = 30
-RAM_SIZE      = 2880  # 2880 × 30秒 = 1日分
-DB_PATH       = "power.db"
-DB_KEEP_DAYS  = 2
+POLL_INTERVAL = int(getenv("POLL_INTERVAL", "30"))
+RAM_SIZE      = int(getenv("RAM_SIZE", "2880"))  # RAM_SIZE × POLL秒 = 保存期間
+DB_PATH       = getenv("DB_PATH", "power.db")
+DB_KEEP_DAYS  = int(getenv("DB_KEEP_DAYS", "2"))
 # ============================================================
 
-# ECHONET Lite フレーム（瞬時電力 0xE7 + 瞬時電流 0xE8 + 積算電力量 0xE0）
+# ECHONET Lite フレーム（瞬時電力 0xE7 + 瞬時電流 0xE8 + 積算電力量 0xE0 + 係数 0xE1）
 EL_FRAME = bytes([
     0x10, 0x81, 0x00, 0x01,
     0x05, 0xFF, 0x01,
     0x02, 0x88, 0x01,
     0x62,        # GET
-    0x03,        # OPC: 3プロパティ
+    0x04,        # OPC: 4プロパティ
     0xE7, 0x00,  # 瞬時電力
     0xE8, 0x00,  # 瞬時電流
     0xE0, 0x00,  # 積算電力量（正方向）
+    0xE1, 0x00,  # 積算電力量の係数
 ])
 
 # ─── グローバル状態
@@ -241,7 +246,20 @@ def request_power(ser, ipv6: str):
     return None, None, None, None
 
 
+# EPC 0xE1 で得られるスケール係数テーブル (ECHONET Lite v1.10)
+# EPC値 -> 係数 (kWh単位)
+# 0x00 = 0.1, 0x80 = 1.0, 0x81 = 10.0, 0x82 = 0.01, 0x83 = 100.0
+E1_COEFFICIENTS = {
+    0x00: 0.1,
+    0x80: 1.0,
+    0x81: 10.0,
+    0x82: 0.01,
+    0x83: 100.0,
+}
+
+
 def parse_el(hex_str: str):
+    """ECHONET Lite 応答をパース。0xE1 係数にも対応。"""
     try:
         data = bytes.fromhex(hex_str)
     except ValueError:
@@ -250,6 +268,7 @@ def parse_el(hex_str: str):
         return None, None, None, None
 
     watt = ampere_r = ampere_t = kwh = None
+    coef = 0.1  # デフォルト係数
     idx, opc = 12, data[11]
     for _ in range(opc):
         if idx + 2 > len(data):
@@ -261,11 +280,12 @@ def parse_el(hex_str: str):
         elif epc == 0xE8 and pdc == 4:
             ampere_r = int.from_bytes(data[idx:idx+2], "big", signed=True)
             ampere_t = int.from_bytes(data[idx+2:idx+4], "big", signed=True)
+        elif epc == 0xE1 and pdc >= 1:
+            # 係数は 1 バイトで表現
+            coef = E1_COEFFICIENTS.get(data[idx], 0.1)
         elif epc == 0xE0 and pdc >= 4:
-            # 積算電力量（単位：0.1 kWh / スケール係数はデフォルト 0xE1=0x00 → 0.1）
-            # pdc は機種により 4 以上になる場合があるが、値は先頭 4 バイト (unsigned 32bit)
             raw = int.from_bytes(data[idx:idx+4], "big", signed=False)
-            kwh = round(raw * 0.1, 1)
+            kwh = round(raw * coef, 1)
         idx += pdc
     return watt, ampere_r, ampere_t, kwh
 
@@ -410,6 +430,50 @@ def api_history(range: str = Query("1h", pattern="^(1h|24h)$")):
             for r in rows
         ],
     }
+
+
+@app.get("/api/export")
+def api_export(
+    range: str = Query("1h", pattern="^(1h|24h)$"),
+    format: str = Query("csv", pattern="^(csv|json)$"),
+):
+    now = datetime.now()
+    if range == "1h":
+        since_ts = int((now - timedelta(hours=1)).timestamp())
+        with state_lock:
+            rows = [r for r in state["ram"] if r["ts"] >= since_ts]
+    else:
+        since_ts = int((now - timedelta(hours=24)).timestamp())
+        rows = db_query(since_ts)
+
+    if format == "json":
+        return {
+            "range": range,
+            "points": [
+                {
+                    "t": datetime.fromtimestamp(r["ts"]).strftime("%Y-%m-%d %H:%M:%S"),
+                    "ts": r["ts"],
+                    "w": r["w"],
+                }
+                for r in rows
+            ],
+        }
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["timestamp", "time", "watt"])
+    for r in rows:
+        writer.writerow([
+            datetime.fromtimestamp(r["ts"]).isoformat(),
+            datetime.fromtimestamp(r["ts"]).strftime("%H:%M"),
+            r["w"],
+        ])
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=power_{range}_{now.strftime('%Y%m%d_%H%M')}.csv"},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
