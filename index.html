@@ -623,67 +623,162 @@ async function fetchHistory() {
   }
 }
 
+
 // ── メイン更新
-function update(data) {
-  maxWatt = data.max_watt || 5000;
-  $badge.className = `badge-${data.status}`;
-  $badge.textContent = data.status === 'ok' ? 'LIVE'
-    : data.status === 'connecting' ? 'CONNECTING' : 'ERROR';
+  function update(data) {
+    try {
+      if (!data) {
+        console.warn('[update] empty response');
+        return;
+      }
 
-  if (data.status === 'connecting') {
-    $loadingTx.textContent = 'Wi-SUN接続中...';
+      console.log('[update]', data);
+
+      // --------------------------------------------------
+      // ステータス表示
+      // --------------------------------------------------
+      const status = data.status || 'error';
+
+      $badge.className = `badge-${status}`;
+      $badge.textContent =
+        status === 'ok'
+          ? 'LIVE'
+          : status === 'connecting'
+          ? 'CONNECTING'
+          : 'ERROR';
+
+      if (status === 'connecting') {
+        $loadingTx.textContent = 'Wi-SUN接続中...';
+        return;
+      }
+
+      if (status !== 'ok') {
+        return;
+      }
+
+      // --------------------------------------------------
+      // 値の正規化
+      // --------------------------------------------------
+      const watt       = Number(data.watt);
+      const pct        = Number(data.pct ?? 0);
+      const remainingW = Number(data.remaining_w ?? 0);
+
+      if (!Number.isFinite(watt)) {
+        console.warn('[update] invalid watt', data);
+        return;
+      }
+
+      // --------------------------------------------------
+      // 初回ロード
+      // --------------------------------------------------
+      if (firstLoad) {
+        firstLoad = false;
+
+        $loading.style.opacity = '0';
+
+        setTimeout(() => {
+          $loading.style.display = 'none';
+        }, 500);
+
+        fetchHistory().catch(e => {
+          console.error('[chart] initial fetch failed', e);
+        });
+
+        chartTimer = setTimeout(schedulePollChart, 30000);
+      }
+
+      // --------------------------------------------------
+      // メーター表示
+      // --------------------------------------------------
+      const col = pctColor(pct);
+
+      $watt.textContent = watt.toLocaleString();
+      $watt.style.color = col;
+
+      $ar.textContent =
+        typeof data.ampere_r === 'number'
+          ? data.ampere_r.toFixed(1)
+          : '--.-';
+
+      $at.textContent =
+        typeof data.ampere_t === 'number'
+          ? data.ampere_t.toFixed(1)
+          : '--.-';
+
+      $pct.textContent = pct.toFixed(1);
+
+      // --------------------------------------------------
+      // ゲージ
+      // --------------------------------------------------
+      $gauge.style.width = `${Math.min(pct, 100)}%`;
+      $gauge.style.background = col;
+      $gauge.style.boxShadow = `0 0 16px ${col}`;
+
+      if (pct >= 90) {
+        $gaugeAlert.style.color = 'var(--red)';
+        $gaugeAlert.textContent =
+          `⚠ 残り ${(100 - pct).toFixed(1)}% — ブレーカーに注意！`;
+
+        $banner.style.display = 'block';
+        $banner.textContent =
+          `⚡ 警告: 使用量 ${pct.toFixed(1)}% — ブレーカー落下の危険があります ⚡`;
+
+      } else if (pct >= 75) {
+        $gaugeAlert.style.color = 'var(--orange)';
+        $gaugeAlert.textContent =
+          `⚠ 使用量が多めです (残り ${remainingW.toLocaleString()} W)`;
+
+        $banner.style.display = 'none';
+
+      } else {
+        $gaugeAlert.style.color = 'var(--green)';
+        $gaugeAlert.textContent =
+          `✓ 安定稼働中 — 残り ${remainingW.toLocaleString()} W`;
+
+        $banner.style.display = 'none';
+      }
+
+      // --------------------------------------------------
+      // 残容量
+      // --------------------------------------------------
+      $remaining.textContent = remainingW.toLocaleString();
+      $remaining.style.color = col;
+
+      // --------------------------------------------------
+      // 電気代
+      // --------------------------------------------------
+      if (
+        data.kwh_month !== null &&
+        data.kwh_month !== undefined &&
+        Number.isFinite(Number(data.kwh_month))
+      ) {
+        updateCost(Number(data.kwh_month));
+      }
+
+      // --------------------------------------------------
+      // 家電リスト
+      // --------------------------------------------------
+      renderAppliances(
+        Array.isArray(data.ok_apps) ? data.ok_apps : [],
+        Array.isArray(data.ng_apps) ? data.ng_apps : []
+      );
+
+      // --------------------------------------------------
+      // 更新時刻
+      // --------------------------------------------------
+      if (
+        typeof data.updated_at === 'string' &&
+        data.updated_at.length >= 19
+      ) {
+        $updated.textContent = data.updated_at.slice(11, 19);
+      }
+
+    } catch (e) {
+      console.error('[update] fatal', e, data);
+    }
   }
 
-  if (data.status !== 'ok' || data.watt === null) return;
 
-  if (firstLoad) {
-    $loading.style.opacity = '0';
-    setTimeout(() => { $loading.style.display = 'none'; }, 500);
-    firstLoad = false;
-    fetchHistory();
-    chartTimer = setTimeout(schedulePollChart, 30000);
-  }
-
-  const pct = data.pct;
-  const col = pctColor(pct);
-
-  $watt.textContent = data.watt.toLocaleString();
-  $watt.style.color = col;
-  $ar.textContent   = data.ampere_r !== null ? data.ampere_r.toFixed(1) : '--.-';
-  $at.textContent   = data.ampere_t !== null ? data.ampere_t.toFixed(1) : '--.-';
-  $pct.textContent  = pct.toFixed(1);
-
-  $gauge.style.width      = Math.min(pct, 100) + '%';
-  $gauge.style.background = col;
-  $gauge.style.boxShadow  = `0 0 16px ${col}`;
-
-  if (pct >= 90) {
-    $gaugeAlert.style.color = 'var(--red)';
-    $gaugeAlert.textContent = `⚠  残り ${(100-pct).toFixed(1)}% — ブレーカーに注意！`;
-    $banner.style.display = 'block';
-    $banner.textContent = `⚡ 警告: 使用量 ${pct.toFixed(1)}% — ブレーカー落下の危険があります ⚡`;
-  } else if (pct >= 75) {
-    $gaugeAlert.style.color = 'var(--orange)';
-    $gaugeAlert.textContent = `⚠  使用量が多めです (残り ${data.remaining_w.toLocaleString()} W)`;
-    $banner.style.display = 'none';
-  } else {
-    $gaugeAlert.style.color = 'var(--green)';
-    $gaugeAlert.textContent = `✓  安定稼働中 — 残り ${data.remaining_w.toLocaleString()} W`;
-    $banner.style.display = 'none';
-  }
-
-  $remaining.textContent = data.remaining_w.toLocaleString();
-  $remaining.style.color = col;
-
-  // 積算・電気代
-  updateCost(data.kwh_month !== null && data.kwh_month !== undefined ? data.kwh_month : null);
-
-  renderAppliances(data.ok_apps || [], data.ng_apps || []);
-
-  if (data.updated_at) {
-    $updated.textContent = data.updated_at.slice(11, 19);
-  }
-}
 
 // ── ポーリング
 let powerPolling = false;
@@ -696,14 +791,30 @@ async function schedulePollPower() {
     powerTimer = setTimeout(schedulePollPower, 1000);
     return;
   }
+
   powerPolling = true;
+
   try {
-    const r = await fetch('/api/power', { signal: AbortSignal.timeout(4000) });
-    if (r.ok) update(await r.json());
-    else { $badge.className = 'badge-error'; $badge.textContent = 'ERROR'; }
-  } catch(e) {
+    const r = await fetch('/api/power', {
+      signal: AbortSignal.timeout(4000)
+    });
+
+    if (!r.ok) {
+      throw new Error(`HTTP ${r.status}`);
+    }
+
+    const data = await r.json();
+
+    try {
+      update(data);
+    } catch (e) {
+      console.error('[update] failed', e, data);
+    }
+
+  } catch (e) {
     console.warn('[power] poll failed:', e.message);
-    $badge.className = 'badge-error'; $badge.textContent = 'ERROR';
+    $badge.className = 'badge-error';
+    $badge.textContent = 'ERROR';
   } finally {
     powerPolling = false;
     powerTimer = setTimeout(schedulePollPower, 5000);
@@ -711,7 +822,7 @@ async function schedulePollPower() {
 }
 
 async function schedulePollChart() {
-  if (firstLoad || chartPolling) {
+  if (chartPolling) {
     chartTimer = setTimeout(schedulePollChart, 30000);
     return;
   }

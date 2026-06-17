@@ -230,11 +230,14 @@ def request_power(ser, ipv6: str):
     ser.write(header.encode() + EL_FRAME + b"\r\n")
     deadline = time.time() + 15.0
     while time.time() < deadline:
-        line = readline(ser)
+        line = readline(ser)  # serial timeout=10 でブロックするので過負荷にはならないが念のため
         if line.startswith("ERXUDP"):
             parts = line.split(" ")
             if len(parts) >= 9:
                 return parse_el(parts[-1])
+        elif not line:
+            # readline がタイムアウトで空文字を返した場合は少し待つ
+            time.sleep(0.1)
     return None, None, None, None
 
 
@@ -258,8 +261,9 @@ def parse_el(hex_str: str):
         elif epc == 0xE8 and pdc == 4:
             ampere_r = int.from_bytes(data[idx:idx+2], "big", signed=True)
             ampere_t = int.from_bytes(data[idx+2:idx+4], "big", signed=True)
-        elif epc == 0xE0 and pdc == 4:
+        elif epc == 0xE0 and pdc >= 4:
             # 積算電力量（単位：0.1 kWh / スケール係数はデフォルト 0xE1=0x00 → 0.1）
+            # pdc は機種により 4 以上になる場合があるが、値は先頭 4 バイト (unsigned 32bit)
             raw = int.from_bytes(data[idx:idx+4], "big", signed=False)
             kwh = round(raw * 0.1, 1)
         idx += pdc
@@ -285,6 +289,11 @@ def wisun_worker():
                 watt, ar, at, kwh = request_power(ser, ipv6)
                 now = datetime.now()
                 ts  = int(now.timestamp())
+
+                # DB アクセスを含む update_kwh_month は state_lock の外で実行
+                # （state_lock 保持中に db_lock を取るとロック順が逆転しデッドロックの温床になる）
+                kwh_month_new = update_kwh_month(kwh) if kwh is not None else None
+
                 with state_lock:
                     if watt is not None:
                         state["watt"]       = watt
@@ -295,7 +304,7 @@ def wisun_worker():
                         state["ram"].append({"ts": ts, "w": watt})
                     if kwh is not None:
                         state["kwh_total"] = kwh
-                        state["kwh_month"] = update_kwh_month(kwh)
+                        state["kwh_month"] = kwh_month_new
 
                 if watt is not None:
                     db_insert(ts, watt)
