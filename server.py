@@ -16,6 +16,8 @@ import time
 import threading
 import sys
 import sqlite3
+import csv
+import io
 from collections import deque
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -44,6 +46,13 @@ POLL_INTERVAL = int(getenv("POLL_INTERVAL", "30"))
 RAM_SIZE      = int(getenv("RAM_SIZE", "2880"))  # RAM_SIZE × POLL秒 = 保存期間
 DB_PATH       = getenv("DB_PATH", "power.db")
 DB_KEEP_DAYS  = int(getenv("DB_KEEP_DAYS", "2"))
+
+# 電気代計算用（月度予測・リアルタイムコスト用）
+COST_BASIC = float(getenv("COST_BASIC", "858"))   # 基本料金（円/月）
+COST_R1    = float(getenv("COST_R1", "29.90"))     # 第1段階（円/kWh）
+COST_R2    = float(getenv("COST_R2", "35.59"))     # 第2段階（円/kWh）
+COST_R3    = float(getenv("COST_R3", "36.50"))     # 第3段階（円/kWh）
+COST_ADJ   = float(getenv("COST_ADJ", "0"))        # 燃料調整等（円/kWh）
 # ============================================================
 
 # ECHONET Lite フレーム（瞬時電力 0xE7 + 瞬時電流 0xE8 + 積算電力量 0xE0 + 係数 0xE1）
@@ -371,6 +380,18 @@ APPLIANCES = [
 ]
 
 
+def _suggest_appliance(delta_w: int) -> str | None:
+    """増加分に近い家電を推測して返す"""
+    if delta_w < 50:
+        return "照明の付け替え"
+    close = min(APPLIANCES, key=lambda a: abs(a["watt"] - delta_w))
+    if abs(close["watt"] - delta_w) < 300:
+        return f"おそらく{close['name']}"
+    if delta_w < 200:
+        return "照明や小型家電の可能性"
+    return None
+
+
 @app.get("/api/power")
 def api_power():
     with state_lock:
@@ -389,20 +410,130 @@ def api_power():
         for a in APPLIANCES:
             (ok_apps if a["watt"] <= remaining_w else ng_apps).append(a)
 
+    # ─── リアルタイム電気代（秒間コスト）
+    live_cost_per_sec = None
+    if watt is not None and kwh_month is not None:
+        basic  = COST_BASIC
+        r1     = COST_R1
+        r2     = COST_R2
+        r3     = COST_R3
+        adj    = COST_ADJ
+        # 瞬間電力(W) → 瞬間消費(kWh/秒)
+        instant_kwh_sec = watt / 3600000.0
+        # 単価計算
+        if kwh_month <= 120:
+            rate = r1 + adj
+        elif kwh_month <= 300:
+            rate = r2 + adj
+        else:
+            rate = r3 + adj
+        live_cost_per_sec = round(instant_kwh_sec * rate, 6)
+
+    # ─── 電力スパイク検知
+    spike_detected = False
+    spike_info     = None
+    if watt is not None and len(state["ram"]) >= 4:
+        recent = [r["w"] for r in list(state["ram"])[-4:]]
+        if len(recent) >= 4:
+            old_vals = recent[:3]
+            newest = recent[3]
+            avg_old = sum(old_vals) / len(old_vals)
+            if avg_old > 100:  # 100W以上が基準
+                increase = (newest - avg_old) / avg_old
+                if increase >= 0.4:  # 40%以上上昇
+                    spike_detected = True
+                    spike_info = {
+                        "watt":      newest,
+                        "increase":  round(increase * 100, 1),
+                        "previous":  round(avg_old, 0),
+                        "appliance": _suggest_appliance(newest - avg_old),
+                    }
+
+    # ─── 当月コスト予測
+    monthly_prediction = None
+    if kwh_month is not None and watt is not None:
+        now      = datetime.now()
+        days_in_month = (now.replace(month=now.month+1 if now.month < 12 else 1, year=now.year+1 if now.month == 12 else now.year, day=1) - now.replace(day=1)).days
+        day_of_month = now.day
+        hours_remaining = (now.replace(day=1, month=now.month+1 if now.month < 12 else 1, year=now.year+1 if now.month == 12 else now.year) - now).total_seconds() / 3600
+        current_rate_w = watt  # 現在の瞬間電力(W)
+        # 現在値を瞬間電力で推計（＝今の消費ペースで残り時間でどれくらい使うか）
+        predicted_remaining_kwh = current_rate_w * hours_remaining / 3600000
+        predicted_month_kwh = round(kwh_month + predicted_remaining_kwh, 1)
+
+        # 過去1日の平均消費ペースでも補正
+        yesterday = now - timedelta(days=1)
+        try:
+            rows_24h = db_query(int(yesterday.timestamp()))
+            if rows_24h:
+                avg_w_24 = sum(r["w"] for r in rows_24h) / len(rows_24h)
+                predicted_24h = avg_w_24 * hours_remaining / 3600000
+                predicted_month_24h = round(kwh_month + predicted_24h, 1)
+            else:
+                predicted_month_24h = predicted_month_kwh
+        except Exception:
+            predicted_month_24h = predicted_month_kwh
+
+        basic  = COST_BASIC
+        r1     = COST_R1
+        r2     = COST_R2
+        r3     = COST_R3
+        adj    = COST_ADJ
+
+        def calc_cost(kwh):
+            if kwh <= 120:
+                return round(kwh * (r1 + adj)) + round(basic)
+            elif kwh <= 300:
+                return round(120 * (r1 + adj) + (kwh - 120) * (r2 + adj)) + round(basic)
+            else:
+                return round(120 * (r1 + adj) + 180 * (r2 + adj) + (kwh - 300) * (r3 + adj)) + round(basic)
+
+        cost_now     = calc_cost(predicted_month_kwh)
+        cost_24h     = calc_cost(predicted_month_24h)
+        prev_month = now.month - 1 if now.month > 1 else 12
+        prev_year  = now.year if now.month > 1 else now.year - 1
+        prev_ym    = f"{prev_year:04d}-{prev_month:02d}"
+        prev_kwh   = db_get_baseline(prev_ym)
+        prev_cost  = calc_cost(prev_kwh) if prev_kwh is not None else None
+
+        if prev_cost is not None and prev_cost > 0:
+            diff_pct = round((cost_now - prev_cost) / prev_cost * 100, 1)
+            if diff_pct > 0:
+                diff_note = f"+{diff_pct:.1f}%"
+            elif diff_pct < 0:
+                diff_note = f"{diff_pct:.1f}%"
+            else:
+                diff_note = "±0%"
+        else:
+            diff_note = "—"
+
+        monthly_prediction = {
+            "predicted_kwh": predicted_month_kwh,
+            "predicted_kwh_24h": predicted_month_24h,
+            "cost_now": cost_now,
+            "cost_24h": cost_24h,
+            "prev_cost": prev_cost,
+            "diff_pct": diff_note,
+        }
+
     return {
-        "watt":        watt,
-        "ampere_r":    round(ar  / 10, 1) if ar  is not None else None,
-        "ampere_t":    round(at_ / 10, 1) if at_ is not None else None,
-        "pct":         pct,
-        "max_watt":    MAX_WATT,
-        "contract_a":  CONTRACT_A,
-        "remaining_w": remaining_w,
-        "kwh_total":   kwh_total,
-        "kwh_month":   kwh_month,
-        "updated_at":  updated_at,
-        "status":      status,
-        "ok_apps":     ok_apps,
-        "ng_apps":     ng_apps,
+        "watt":             watt,
+        "ampere_r":         round(ar  / 10, 1) if ar  is not None else None,
+        "ampere_t":         round(at_ / 10, 1) if at_ is not None else None,
+        "pct":              pct,
+        "max_watt":         MAX_WATT,
+        "contract_a":       CONTRACT_A,
+        "remaining_w":      remaining_w,
+        "kwh_total":        kwh_total,
+        "kwh_month":        kwh_month,
+        "updated_at":       updated_at,
+        "status":           status,
+        "ok_apps":          ok_apps,
+        "ng_apps":          ng_apps,
+        "live_cost_per_sec": live_cost_per_sec,
+        "spike_detected":   spike_detected,
+        "spike_info":       spike_info,
+        "monthly_prediction": monthly_prediction,
     }
 
 
