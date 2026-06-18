@@ -343,6 +343,7 @@
       <div class="range-btns">
         <button class="range-btn active" id="btn-1h"  onclick="switchRange('1h')">1H</button>
         <button class="range-btn"        id="btn-24h" onclick="switchRange('24h')">24H</button>
+        <button class="range-btn"        id="btn-export" onclick="exportCSV()">↓ CSV</button>
       </div>
     </div>
     <div id="chart-loading">読み込み中...</div>
@@ -376,24 +377,6 @@
         <div class="live-cost-val" id="live-cost-val">--</div>
         <div class="live-cost-unit">円/秒</div>
       </div>
-    </div>
-
-    <!-- 当月コスト予測 -->
-    <div class="card prediction-card" id="prediction-card" style="display:none;">
-      <div class="card-label">当月コスト予測</div>
-      <div class="pred-row">
-        <span class="pred-lbl">現在ペース</span>
-        <span class="pred-val" id="pred-cost-now">--</span>
-      </div>
-      <div class="pred-row">
-        <span class="pred-lbl">24h平均ベース</span>
-        <span class="pred-val" id="pred-cost-24h">--</span>
-      </div>
-      <div class="pred-row">
-        <span class="pred-lbl">前月比</span>
-        <span class="pred-val" id="pred-diff">--</span>
-      </div>
-      <div class="pred-note" id="pred-note"></div>
     </div>
 
     <!-- 料金設定 -->
@@ -471,11 +454,6 @@ const $costEst   = document.getElementById('cost-est');
 const $costNote  = document.getElementById('cost-note');
 const $liveCost  = document.getElementById('live-cost-val');
 const $liveRow   = document.getElementById('live-cost-row');
-const $predCard  = document.getElementById('prediction-card');
-const $predCostNow   = document.getElementById('pred-cost-now');
-const $predCost24h   = document.getElementById('pred-cost-24h');
-const $predDiff  = document.getElementById('pred-diff');
-const $predNote  = document.getElementById('pred-note');
 const $spikeBanner = document.getElementById('spike-banner');
 const $spikeText   = document.getElementById('spike-text');
 const $okList    = document.getElementById('ok-list');
@@ -850,28 +828,6 @@ async function fetchHistory() {
       }
 
       // --------------------------------------------------
-      // 当月コスト予測
-      // --------------------------------------------------
-      if (data.monthly_prediction) {
-        const mp = data.monthly_prediction;
-        $predCard.style.display = 'block';
-        $predCostNow.textContent  = `${mp.cost_now.toLocaleString()} 円`;
-        $predCost24h.textContent  = `${mp.cost_24h.toLocaleString()} 円`;
-
-        $predDiff.textContent  = mp.diff_pct;
-        if (mp.diff_pct.startsWith('-') || mp.diff_pct === '±0%') {
-          $predDiff.className = 'pred-val down';
-        } else if (mp.diff_pct !== '—') {
-          $predDiff.className = 'pred-val up';
-        } else {
-          $predDiff.className = 'pred-val';
-        }
-        $predNote.textContent = `当月 ${mp.predicted_kwh} kWh / 前月 ${mp.prev_cost !== null ? `${Math.round(mp.prev_cost).toLocaleString()}円` : '---'}`;
-      } else {
-        $predCard.style.display = 'none';
-      }
-
-      // --------------------------------------------------
       // 家電リスト
       // --------------------------------------------------
       renderAppliances(
@@ -962,6 +918,12 @@ document.addEventListener('visibilitychange', () => {
 });
 
 window.addEventListener('resize', () => drawChart(chartData));
+
+// ── CSVエクスポート
+function exportCSV() {
+  const range = currentRange;
+  window.location.href = `/api/export?range=${range}&format=csv`;
+}
 
 // ── 起動
 loadSettings();
