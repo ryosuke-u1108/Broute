@@ -319,9 +319,15 @@ def wisun_worker():
                 now = datetime.now()
                 ts  = int(now.timestamp())
 
-                # DB アクセスを含む update_kwh_month は state_lock の外で実行
-                # （state_lock 保持中に db_lock を取るとロック順が逆転しデッドロックの温床になる）
-                kwh_month_new = update_kwh_month(kwh) if kwh is not None else None
+                # update_kwh_month は例外で inner loop が落ちると
+                # Wi-SUN 再接続(60s+)で表示が完全に止まるため
+                # 例外を捕まえてGraceful fallback する
+                kwh_month_new = None
+                if kwh is not None:
+                    try:
+                        kwh_month_new = update_kwh_month(kwh)
+                    except Exception:
+                        print("[wisun_worker] update_kwh_month failed (keeping old value)", file=sys.stderr)
 
                 with state_lock:
                     if watt is not None:
@@ -336,10 +342,16 @@ def wisun_worker():
                         state["kwh_month"] = kwh_month_new
 
                 if watt is not None:
-                    db_insert(ts, watt)
+                    try:
+                        db_insert(ts, watt)
+                    except Exception:
+                        pass
                 cleanup_counter += 1
                 if cleanup_counter >= 120:
-                    db_cleanup()
+                    try:
+                        db_cleanup()
+                    except Exception:
+                        pass
                     cleanup_counter = 0
                 time.sleep(POLL_INTERVAL)
 
