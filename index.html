@@ -582,22 +582,24 @@ function renderAppliances(okApps, ngApps) {
 
 // ── チャート描画
 function drawChart(points) {
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth;
-  const H = canvas.clientHeight;
-  canvas.width  = W * dpr;
-  canvas.height = H * dpr;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, W, H);
+  if (!ctx || !canvas) return;
+  try {
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.clientWidth;
+    const H = canvas.clientHeight;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
 
-  if (!points || points.length < 2) {
-    ctx.fillStyle = 'rgba(74,96,112,.5)';
-    ctx.font = `12px 'Share Tech Mono'`;
-    ctx.textAlign = 'center';
-    ctx.fillText('データが溜まるまで少しお待ちください', W/2, H/2);
-    return;
-  }
+    if (!points || points.length < 2) {
+      ctx.fillStyle = 'rgba(74,96,112,.5)';
+      ctx.font = `12px 'Share Tech Mono'`;
+      ctx.textAlign = 'center';
+      ctx.fillText('データが溜まるまで少しお待ちください', W/2, H/2);
+      return;
+    }
 
   const pad = { t: 8, r: 8, b: 22, l: 56 };
   const cw = W - pad.l - pad.r;
@@ -643,6 +645,9 @@ function drawChart(points) {
   for (let k = 0; k < labelCount; k++) {
     const i = Math.round(k * (points.length - 1) / (labelCount - 1));
     ctx.fillText(points[i].t, toX(i), H - 4);
+  }
+  } catch (e) {
+    console.error('[drawChart] fatal:', e);
   }
 }
 
@@ -853,67 +858,61 @@ async function fetchHistory() {
 
 
 // ── ポーリング
-let powerPolling = false;
-let chartPolling = false;
 let powerTimer   = null;
 let chartTimer   = null;
 
 async function schedulePollPower() {
-  if (powerPolling) {
-    powerTimer = setTimeout(schedulePollPower, 1000);
-    return;
-  }
-
-  powerPolling = true;
-
-  try {
-    const r = await fetch('/api/power', {
-      signal: AbortSignal.timeout(4000)
-    });
-
-    if (!r.ok) {
-      throw new Error(`HTTP ${r.status}`);
-    }
-
-    const data = await r.json();
-
+  // 既存のタイマーをクリア（重複防止）
+  clearTimeout(powerTimer);
+  powerTimer = setTimeout(async () => {
     try {
-      update(data);
-    } catch (e) {
-      console.error('[update] failed', e, data);
-    }
+      const r = await fetch('/api/power', {
+        signal: AbortSignal.timeout(4000)
+      });
 
-  } catch (e) {
-    console.warn('[power] poll failed:', e.message);
-    $badge.className = 'badge-error';
-    $badge.textContent = 'ERROR';
-  } finally {
-    powerPolling = false;
-    powerTimer = setTimeout(schedulePollPower, 5000);
-  }
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status}`);
+      }
+
+      const data = await r.json();
+
+      try {
+        update(data);
+      } catch (e) {
+        console.error('[update] failed', e, data);
+      }
+
+    } catch (e) {
+      console.warn('[power] poll failed:', e.message);
+      $badge.className = 'badge-error';
+      $badge.textContent = 'ERROR';
+    } finally {
+      // 次のpollを予約（再帰呼び出しではなく単一のループ）
+      schedulePollPower();
+    }
+  }, 5000);
 }
 
 async function schedulePollChart() {
-  if (chartPolling) {
-    chartTimer = setTimeout(schedulePollChart, 30000);
-    return;
-  }
-  chartPolling = true;
-  try {
-    await fetchHistory();
-  } finally {
-    chartPolling = false;
-    chartTimer = setTimeout(schedulePollChart, 30000);
-  }
+  clearTimeout(chartTimer);
+  chartTimer = setTimeout(async () => {
+    try {
+      await fetchHistory();
+    } catch(e) {
+      console.warn('[chart] poll failed:', e.message);
+    } finally {
+      schedulePollChart();
+    }
+  }, 30000);
 }
 
+// visibilitychangeではポーリングを止めない（状態の壊れを防ぐ）
+// タブ表示時にだけリフレッシュしたい場合は、ここで再開始する
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
+  if (!document.hidden) {
+    // 表示時に即座にpowerデータのリフレッシュ
     clearTimeout(powerTimer);
-    clearTimeout(chartTimer);
-  } else {
     schedulePollPower();
-    if (!firstLoad) schedulePollChart();
   }
 });
 
